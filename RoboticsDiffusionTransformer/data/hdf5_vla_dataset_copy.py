@@ -86,6 +86,7 @@ class HDF5VLADataset:
                 index = np.random.randint(0, len(self.file_paths))
 
     def parse_hdf5_file(self, file_path):
+        # import pdb; pdb.set_trace()
         # 读取 parquet 文件`
         df = pd.read_parquet(file_path)
         qpos = np.stack(df['observation.state'].values)  # 形状: (T, 6)
@@ -126,7 +127,7 @@ class HDF5VLADataset:
         # 随机采样时间步
         start_idx = max(0, first_idx - 1)
                 # --- MODIFICATION END ---
-        step_id = np.random.randint(start_idx, num_steps)
+        step_id = start_idx + 1
 
         # 加载语言指令（从 meta/ 目录，这里先直接赋值
         episode_idx = int(os.path.basename(file_path).split('_')[1].split('.')[0])
@@ -134,7 +135,6 @@ class HDF5VLADataset:
         instruction = 'data/datasets/so101_2cam_banana_240x320_opencv/meta/lang_embed_0.pt'
         # instruction = task_desc
 
-        # import pdb; pdb.set_trace()
         # Assemble the meta
         meta = {
             "dataset_name": self.DATASET_NAME,
@@ -240,6 +240,7 @@ class HDF5VLADataset:
 
             return frames_array, mask
 
+        # import pdb; pdb.set_trace()
         # 加载顶部摄像头（外部视角）
         cam_high, cam_high_mask = load_camera_frames("top_view", step_id, first_idx)
 
@@ -249,6 +250,8 @@ class HDF5VLADataset:
         # 左手腕摄像头不可用
         cam_left_wrist = np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
         cam_left_wrist_mask = np.zeros(self.IMG_HISORY_SIZE, dtype=bool)
+
+        # import pdb; pdb.set_trace()
 
         # Return the resulting sample
         # For unavailable images, return zero-shape arrays, i.e., (IMG_HISORY_SIZE, 0, 0, 0)
@@ -324,6 +327,4 @@ class HDF5VLADataset:
 
 if __name__ == "__main__":
     ds = HDF5VLADataset()
-    for i in range(len(ds)):
-        print(f"Processing episode {i}/{len(ds)}...")
-        ds.get_item(i)
+    ds.get_item(0)
