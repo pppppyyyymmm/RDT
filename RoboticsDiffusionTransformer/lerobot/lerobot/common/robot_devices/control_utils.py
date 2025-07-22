@@ -220,32 +220,65 @@ def record_episode(
 
 import torch
 
-
+# 优化差值方式，对齐弧度角度
 def interp_action(current_robot_action, predicted_plan, max_deg_per_step=0.4):
+    """
+    在机器人当前动作和预测计划之间插入过渡动作，确保关节角度变化率不超过阈值
 
+    参数:
+        current_robot_action (torch.Tensor): 当前机器人动作向量 [n_dims]
+        predicted_plan (torch.Tensor): 预测动作序列 [steps, n_dims]
+        max_deg_per_step (float): 单步最大允许角度变化（度）
+
+    返回:
+        torch.Tensor: 插值后的动作序列 [new_steps, n_dims]
+    """
+
+    # 处理空预测计划的情况
     if predicted_plan.shape[0] == 0:
         return torch.empty_like(predicted_plan)
 
+    # 将角度限制从度转换为弧度
     max_rad_per_step = torch.deg2rad(torch.tensor(max_deg_per_step))
+
+    # 获取预测计划的第一步动作
     first_planned_action = predicted_plan[0]
 
+    # 计算当前动作与预测第一步动作前5个维度（关节角度）的绝对差值
     delta = torch.abs(first_planned_action[:5] - current_robot_action[:5])
 
+    # 找出所有关节中的最大角度变化量
     max_delta = torch.max(delta)
 
+    # 如果最大角度变化量在允许范围内，直接返回原始计划
     if max_delta <= max_rad_per_step:
         return predicted_plan
+
+    # 需要插值的情况
     else:
+        # 计算需要插入的步数（向上取整）
         num_interp_steps = torch.ceil(max_delta / max_rad_per_step)
-        num_interp_steps = int(num_interp_steps.item())
+        num_interp_steps = int(num_interp_steps.item())  # 转换为整数
 
         interpolated_steps = []
+        # 生成插值动作序列
         for i in range(1, num_interp_steps + 1):
+            # 计算当前插值权重（线性递增）
             weight = i / num_interp_steps
-            step = torch.lerp(current_robot_action.unsqueeze(0), first_planned_action.unsqueeze(0), weight)
+
+            # 执行线性插值（对完整动作向量）
+            step = torch.lerp(
+                current_robot_action.unsqueeze(0),  # 添加批次维度
+                first_planned_action.unsqueeze(0),
+                weight
+            )
             interpolated_steps.append(step)
 
+        # 组合最终动作序列：
+        # 1. 插值生成的中间动作
+        # 2. 原始计划中除第一步外的剩余动作
         final_plan = torch.cat(interpolated_steps + [predicted_plan[1:]], dim=0)
+
         return final_plan
 
 def change2isaac(action):
@@ -438,8 +471,6 @@ def control_loop(
                     action_to_send[5] = action_to_send[5] * (gripper_max - gripper_min) + gripper_min
 
                     action = robot.send_action(action_to_send)
-
-                    time.sleep(0.025)
 
                     action = {'action': action}
 
