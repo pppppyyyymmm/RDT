@@ -275,7 +275,7 @@ def train(args, logger):
         collate_fn=data_collator,
         num_workers=args.dataloader_num_workers,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=args.dataloader_num_workers > 0
     )
     sample_dataloader = torch.utils.data.DataLoader(
         sample_dataset,
@@ -284,7 +284,7 @@ def train(args, logger):
         collate_fn=data_collator,
         num_workers=args.dataloader_num_workers,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=args.dataloader_num_workers > 0
     )
     
     # Scheduler and math around the number of training steps.
@@ -422,6 +422,7 @@ def train(args, logger):
                             input_ids=batch["input_ids"],
                             attention_mask=lang_attn_mask
                         )["last_hidden_state"].detach()
+                # import pdb; pdb.set_trace()
                 
                 state_elem_mask = state_elem_mask.unsqueeze(1)
                 loss = rdt(
