@@ -6,9 +6,10 @@ import h5py
 import yaml
 import cv2
 import numpy as np
+import pandas as pd
 
 from configs.state_vec import STATE_VEC_IDX_MAPPING
-
+Episode_Num = 80
 
 class HDF5VLADataset:
     """
@@ -18,22 +19,33 @@ class HDF5VLADataset:
     def __init__(self) -> None:
         # [Modify] The path to the HDF5 dataset directory
         # Each HDF5 file contains one episode
-        HDF5_DIR = "data/datasets/agilex/rdt_data/"
-        self.DATASET_NAME = "agilex"
-        
+        # 修改为你的数据集路径
+        self.HDF5_DIR = "data/datasets"
+        self.DATASET_NAME = "so101_2cam_banana_240x320_opencv"
+
+        # 初始化文件路径列表
         self.file_paths = []
-        for root, _, files in os.walk(HDF5_DIR):
-            for filename in fnmatch.filter(files, '*.hdf5'):
-                file_path = os.path.join(root, filename)
-                self.file_paths.append(file_path)
-                
+
+        # 生成并存储所有文件路径
+        self.generate_file_paths()
+
+    def generate_file_paths(self):
+        base_path = os.path.join(self.HDF5_DIR, self.DATASET_NAME, "data", "chunk-000")
+
+        for i in range(Episode_Num):
+            file_name = f"episode_{i:06d}.parquet"
+            file_path = os.path.join(base_path, file_name)
+
+            rel_path = os.path.join(self.HDF5_DIR, self.DATASET_NAME, "data", "chunk-000", file_name)
+            self.file_paths.append(rel_path)
+
         # Load the config
         with open('configs/base.yaml', 'r') as file:
             config = yaml.safe_load(file)
         self.CHUNK_SIZE = config['common']['action_chunk_size']
         self.IMG_HISORY_SIZE = config['common']['img_history_size']
         self.STATE_DIM = config['common']['state_dim']
-    
+
         # Get each episode's len
         episode_lens = []
         for file_path in self.file_paths:
@@ -72,249 +84,243 @@ class HDF5VLADataset:
                 return sample
             else:
                 index = np.random.randint(0, len(self.file_paths))
-    
-    def parse_hdf5_file(self, file_path):
-        """[Modify] Parse a hdf5 file to generate a training sample at
-            a random timestep.
 
-        Args:
-            file_path (str): the path to the hdf5 file
-        
-        Returns:
-            valid (bool): whether the episode is valid, which is useful for filtering.
-                If False, this episode will be dropped.
-            dict: a dictionary containing the training sample,
-                {
-                    "meta": {
-                        "dataset_name": str,    # the name of your dataset.
-                        "#steps": int,          # the number of steps in the episode,
-                                                # also the total timesteps.
-                        "instruction": str      # the language instruction for this episode.
-                    },                           
-                    "step_id": int,             # the index of the sampled step,
-                                                # also the timestep t.
-                    "state": ndarray,           # state[t], (1, STATE_DIM).
-                    "state_std": ndarray,       # std(state[:]), (STATE_DIM,).
-                    "state_mean": ndarray,      # mean(state[:]), (STATE_DIM,).
-                    "state_norm": ndarray,      # norm(state[:]), (STATE_DIM,).
-                    "actions": ndarray,         # action[t:t+CHUNK_SIZE], (CHUNK_SIZE, STATE_DIM).
-                    "state_indicator", ndarray, # indicates the validness of each dim, (STATE_DIM,).
-                    "cam_high": ndarray,        # external camera image, (IMG_HISORY_SIZE, H, W, 3)
-                                                # or (IMG_HISORY_SIZE, 0, 0, 0) if unavailable.
-                    "cam_high_mask": ndarray,   # indicates the validness of each timestep, (IMG_HISORY_SIZE,) boolean array.
-                                                # For the first IMAGE_HISTORY_SIZE-1 timesteps, the mask should be False.
-                    "cam_left_wrist": ndarray,  # left wrist camera image, (IMG_HISORY_SIZE, H, W, 3).
-                                                # or (IMG_HISORY_SIZE, 0, 0, 0) if unavailable.
-                    "cam_left_wrist_mask": ndarray,
-                    "cam_right_wrist": ndarray, # right wrist camera image, (IMG_HISORY_SIZE, H, W, 3).
-                                                # or (IMG_HISORY_SIZE, 0, 0, 0) if unavailable.
-                                                # If only one wrist, make it right wrist, plz.
-                    "cam_right_wrist_mask": ndarray
-                } or None if the episode is invalid.
-        """
-        with h5py.File(file_path, 'r') as f:
-            qpos = f['observations']['qpos'][:]
-            num_steps = qpos.shape[0]
-            # [Optional] We drop too-short episode
-            if num_steps < 128:
-                return False, None
-            
-            # [Optional] We skip the first few still steps
-            EPS = 1e-2
-            # Get the idx of the first qpos whose delta exceeds the threshold
-            qpos_delta = np.abs(qpos - qpos[0:1])
-            indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
-            if len(indices) > 0:
-                first_idx = indices[0]
-            else:
-                raise ValueError("Found no qpos that exceeds the threshold.")
-            
-            # We randomly sample a timestep
-            step_id = np.random.randint(first_idx-1, num_steps)
-            
-            # Load the instruction
-            dir_path = os.path.dirname(file_path)
-            with open(os.path.join(dir_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
-                instruction_dict = json.load(f_instr)
-            # We have 1/3 prob to use original instruction,
-            # 1/3 to use simplified instruction,
-            # and 1/3 to use expanded instruction.
-            instruction_type = np.random.choice([
-                'instruction', 'simplified_instruction', 'expanded_instruction'])
-            instruction = instruction_dict[instruction_type]
-            if isinstance(instruction, list):
-                instruction = np.random.choice(instruction)
-            # You can also use precomputed language embeddings (recommended)
-            # instruction = "path/to/lang_embed.pt"
-            
-            # Assemble the meta
-            meta = {
-                "dataset_name": self.DATASET_NAME,
-                "#steps": num_steps,
-                "step_id": step_id,
-                "instruction": instruction
-            }
-            
-            # Rescale gripper to [0, 1]
-            qpos = qpos / np.array(
-               [[1, 1, 1, 1, 1, 1, 4.7908, 1, 1, 1, 1, 1, 1, 4.7888]] 
+    def parse_hdf5_file(self, file_path):
+        # 读取 parquet 文件`
+        df = pd.read_parquet(file_path)
+        qpos = np.stack(df['observation.state'].values)  # 形状: (T, 6)
+        actions = np.stack(df['action'].values)  # 形状: (T, 6)
+        #import pdb; pdb.set_trace()
+
+        # --- Convert degrees to radians ---
+        # The first 5 columns are joint angles, the 6th is the gripper.
+        # Only convert the joint angles.
+        qpos[:, :5] = np.deg2rad(qpos[:, :5])
+        actions[:, :5] = np.deg2rad(actions[:, :5])
+        # --- MODIFICATION END ---
+
+        # --- Normalize gripper to [0, 1] ---
+        # Based on your stats file: min=0.650, max=49.133 for state
+        # We use the same stats for actions for consistency
+        gripper_min = 0.650288999080658
+        gripper_max = 49.13294982910156
+        # The 6th column (index 5) is the gripper value
+        qpos[:, 5] = (qpos[:, 5] - gripper_min) / (gripper_max - gripper_min)
+        actions[:, 5] = (actions[:, 5] - gripper_min) / (gripper_max - gripper_min)
+        # --- NEW MODIFICATION END ---
+
+        num_steps = qpos.shape[0]
+        # [Optional] We drop too-short episode
+        if num_steps < 128:
+            return False, None
+
+        # 跳过静止帧（与原始逻辑一致）
+        EPS = 1e-2
+        qpos_delta = np.abs(qpos - qpos[0])
+        indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
+        if len(indices) > 0:
+            first_idx = indices[0]
+        else:
+            raise ValueError("Found no qpos that exceeds the threshold.")
+
+        # 随机采样时间步
+        start_idx = max(0, first_idx - 1)
+                # --- MODIFICATION END ---
+        step_id = np.random.randint(start_idx, num_steps)
+
+        # 加载语言指令（从 meta/ 目录，这里先直接赋值
+        episode_idx = int(os.path.basename(file_path).split('_')[1].split('.')[0])
+        task_desc = "Pick up the banana and place it on the plate."
+        instruction = 'data/datasets/so101_2cam_banana_240x320_opencv/meta/lang_embed_0.pt'
+        # instruction = task_desc
+
+        # import pdb; pdb.set_trace()
+        # Assemble the meta
+        meta = {
+            "dataset_name": self.DATASET_NAME,
+            "#steps": num_steps,
+            "step_id": step_id,
+            "instruction": instruction
+        }
+
+        # Parse the state and action
+        state = qpos[step_id:step_id + 1]
+        state_std = np.std(qpos, axis=0)
+        state_mean = np.mean(qpos, axis=0)
+        state_norm = np.sqrt(np.mean(qpos ** 2, axis=0))
+        actions = actions[step_id:step_id+self.CHUNK_SIZE]
+        if actions.shape[0] < self.CHUNK_SIZE:
+            # Pad the actions using the last action
+            actions = np.concatenate([
+                actions,
+                np.tile(actions[-1:], (self.CHUNK_SIZE - actions.shape[0], 1))
+            ], axis=0)
+
+        # 填充到统一状态向量
+        def fill_in_state(values):
+            UNI_STATE_INDICES = [
+                                    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(5)
+                                ] + [
+                                    STATE_VEC_IDX_MAPPING["right_gripper_open"]
+                                ]
+
+            uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
+            uni_vec[..., UNI_STATE_INDICES] = values
+            return uni_vec
+        state = fill_in_state(state)
+        state_indicator = fill_in_state(np.ones_like(state_std))
+        state_std = fill_in_state(state_std)
+        state_mean = fill_in_state(state_mean)
+        state_norm = fill_in_state(state_norm)
+        # If action's format is different from state's,
+        # you may implement fill_in_action()
+        actions = fill_in_state(actions)
+
+        # 替换 parse_img 函数
+        def load_camera_frames(camera_name, step_id, first_idx):
+            """加载指定摄像头的图像历史帧"""
+            # 1. 构建视频文件路径
+            video_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(file_path))),  # 上两级目录
+                'videos',
+                f"chunk-{str(episode_idx // 1000).zfill(3)}",  # chunk 目录
+                f"observation.images.{camera_name}"  # 摄像头类型
             )
-            target_qpos = f['action'][step_id:step_id+self.CHUNK_SIZE] / np.array(
-               [[1, 1, 1, 1, 1, 1, 11.8997, 1, 1, 1, 1, 1, 1, 13.9231]] 
-            )
-            
-            # Parse the state and action
-            state = qpos[step_id:step_id+1]
-            state_std = np.std(qpos, axis=0)
-            state_mean = np.mean(qpos, axis=0)
-            state_norm = np.sqrt(np.mean(qpos**2, axis=0))
-            actions = target_qpos
-            if actions.shape[0] < self.CHUNK_SIZE:
-                # Pad the actions using the last action
-                actions = np.concatenate([
-                    actions,
-                    np.tile(actions[-1:], (self.CHUNK_SIZE-actions.shape[0], 1))
-                ], axis=0)
-            
-            # Fill the state/action into the unified vector
-            def fill_in_state(values):
-                # Target indices corresponding to your state space
-                # In this example: 6 joints + 1 gripper for each arm
-                UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"]
-                ] + [
-                    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"]
-                ]
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-                uni_vec[..., UNI_STATE_INDICES] = values
-                return uni_vec
-            state = fill_in_state(state)
-            state_indicator = fill_in_state(np.ones_like(state_std))
-            state_std = fill_in_state(state_std)
-            state_mean = fill_in_state(state_mean)
-            state_norm = fill_in_state(state_norm)
-            # If action's format is different from state's,
-            # you may implement fill_in_action()
-            actions = fill_in_state(actions)
-            
-            # Parse the images
-            def parse_img(key):
-                imgs = []
-                for i in range(max(step_id-self.IMG_HISORY_SIZE+1, 0), step_id+1):
-                    img = f['observations']['images'][key][i]
-                    imgs.append(cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR))
-                imgs = np.stack(imgs)
-                if imgs.shape[0] < self.IMG_HISORY_SIZE:
-                    # Pad the images using the first image
-                    imgs = np.concatenate([
-                        np.tile(imgs[:1], (self.IMG_HISORY_SIZE-imgs.shape[0], 1, 1, 1)),
-                        imgs
-                    ], axis=0)
-                return imgs
-            # `cam_high` is the external camera image
-            cam_high = parse_img('cam_high')
-            # For step_id = first_idx - 1, the valid_len should be one
-            valid_len = min(step_id - (first_idx - 1) + 1, self.IMG_HISORY_SIZE)
-            cam_high_mask = np.array(
-                [False] * (self.IMG_HISORY_SIZE - valid_len) + [True] * valid_len
-            )
-            cam_left_wrist = parse_img('cam_left_wrist')
-            cam_left_wrist_mask = cam_high_mask.copy()
-            cam_right_wrist = parse_img('cam_right_wrist')
-            cam_right_wrist_mask = cam_high_mask.copy()
-            
-            # Return the resulting sample
-            # For unavailable images, return zero-shape arrays, i.e., (IMG_HISORY_SIZE, 0, 0, 0)
-            # E.g., return np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0)) for the key "cam_left_wrist",
-            # if the left-wrist camera is unavailable on your robot
-            return True, {
-                "meta": meta,
-                "state": state,
-                "state_std": state_std,
-                "state_mean": state_mean,
-                "state_norm": state_norm,
-                "actions": actions,
-                "state_indicator": state_indicator,
-                "cam_high": cam_high,
-                "cam_high_mask": cam_high_mask,
-                "cam_left_wrist": cam_left_wrist,
-                "cam_left_wrist_mask": cam_left_wrist_mask,
-                "cam_right_wrist": cam_right_wrist,
-                "cam_right_wrist_mask": cam_right_wrist_mask
-            }
+            video_path = os.path.join(video_dir, f"episode_{str(episode_idx).zfill(6)}.mp4")
+
+            # 2. 如果视频文件不存在，返回空数组
+            if not os.path.exists(video_path):
+                return np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0)), np.zeros(self.IMG_HISORY_SIZE, dtype=bool)
+
+            # 3. 使用 OpenCV 打开视频
+            cap = cv2.VideoCapture(video_path)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            # 4. 计算需要加载的帧范围
+            start_frame = max(0, step_id - self.IMG_HISORY_SIZE + 1)
+            end_frame = min(step_id + 1, total_frames)  # +1 因为 range 不包含结束值
+            num_frames = end_frame - start_frame
+
+            # 5. 跳转到起始帧
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+            # 6. 读取帧并转换为RGB
+            frames = []
+            for _ in range(num_frames):
+                ret, frame = cap.read()
+                if ret:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frames.append(frame)
+
+            cap.release()
+
+            # 7. 如果帧数不足，在前面填充黑色帧
+            if len(frames) < self.IMG_HISORY_SIZE:
+                padding_frames = self.IMG_HISORY_SIZE - len(frames)
+                if frames:
+                    black_frame = np.zeros_like(frames[0])
+                else:
+                    # 如果没有帧，创建默认尺寸 (240x320x3)
+                    black_frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+                frames = [black_frame] * padding_frames + frames
+
+            # 8. 转换为 numpy 数组
+            frames_array = np.array(frames)
+
+            # 9. 创建有效帧掩码
+            # 有效帧：从第一个有效帧(first_idx-1)到当前帧
+            valid_start = max(start_frame, first_idx - 1)
+            valid_in_sequence = max(0, valid_start - start_frame)
+            valid_count = min(num_frames, step_id - valid_start + 1)
+
+            # 10. 创建掩码数组
+            mask = np.zeros(self.IMG_HISORY_SIZE, dtype=bool)
+            mask[valid_in_sequence:valid_in_sequence + valid_count] = True
+
+            return frames_array, mask
+
+        # 加载顶部摄像头（外部视角）
+        cam_high, cam_high_mask = load_camera_frames("top_view", step_id, first_idx)
+
+        # 加载手腕摄像头（SO101只有一个手腕摄像头，视为右手腕）
+        cam_right_wrist, cam_right_wrist_mask = load_camera_frames("hand_view", step_id, first_idx)
+
+        # 左手腕摄像头不可用
+        cam_left_wrist = np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0))
+        cam_left_wrist_mask = np.zeros(self.IMG_HISORY_SIZE, dtype=bool)
+
+        # Return the resulting sample
+        # For unavailable images, return zero-shape arrays, i.e., (IMG_HISORY_SIZE, 0, 0, 0)
+        # E.g., return np.zeros((self.IMG_HISORY_SIZE, 0, 0, 0)) for the key "cam_left_wrist",
+        # if the left-wrist camera is unavailable on your robot
+        return True, {
+            "meta": meta,
+            "state": state,
+            "state_std": state_std,
+            "state_mean": state_mean,
+            "state_norm": state_norm,
+            "actions": actions,
+            "state_indicator": state_indicator,
+            "cam_high": cam_high,
+            "cam_high_mask": cam_high_mask,
+            "cam_left_wrist": cam_left_wrist,
+            "cam_left_wrist_mask": cam_left_wrist_mask,
+            "cam_right_wrist": cam_right_wrist,
+            "cam_right_wrist_mask": cam_right_wrist_mask
+        }
 
     def parse_hdf5_file_state_only(self, file_path):
-        """[Modify] Parse a hdf5 file to generate a state trajectory.
+        # 使用 pandas 读取 parquet 文件
+        df = pd.read_parquet(file_path)
+        qpos = np.stack(df['observation.state'].values)  # 形状: (T, 6)
+        actions = np.stack(df['action'].values)  # 形状: (T, 6)
 
-        Args:
-            file_path (str): the path to the hdf5 file
-        
-        Returns:
-            valid (bool): whether the episode is valid, which is useful for filtering.
-                If False, this episode will be dropped.
-            dict: a dictionary containing the training sample,
-                {
-                    "state": ndarray,           # state[:], (T, STATE_DIM).
-                    "action": ndarray,          # action[:], (T, STATE_DIM).
-                } or None if the episode is invalid.
-        """
-        with h5py.File(file_path, 'r') as f:
-            qpos = f['observations']['qpos'][:]
-            num_steps = qpos.shape[0]
-            # [Optional] We drop too-short episode
-            if num_steps < 128:
-                return False, None
-            
-            # [Optional] We skip the first few still steps
-            EPS = 1e-2
-            # Get the idx of the first qpos whose delta exceeds the threshold
-            qpos_delta = np.abs(qpos - qpos[0:1])
-            indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
-            if len(indices) > 0:
-                first_idx = indices[0]
-            else:
-                raise ValueError("Found no qpos that exceeds the threshold.")
-            
-            # Rescale gripper to [0, 1]
-            qpos = qpos / np.array(
-               [[1, 1, 1, 1, 1, 1, 4.7908, 1, 1, 1, 1, 1, 1, 4.7888]] 
-            )
-            target_qpos = f['action'][:] / np.array(
-               [[1, 1, 1, 1, 1, 1, 11.8997, 1, 1, 1, 1, 1, 1, 13.9231]] 
-            )
-            
-            # Parse the state and action
-            state = qpos[first_idx-1:]
-            action = target_qpos[first_idx-1:]
-            
-            # Fill the state/action into the unified vector
-            def fill_in_state(values):
-                # Target indices corresponding to your state space
-                # In this example: 6 joints + 1 gripper for each arm
-                UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"]
-                ] + [
-                    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"]
-                ]
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
-                uni_vec[..., UNI_STATE_INDICES] = values
-                return uni_vec
-            state = fill_in_state(state)
-            action = fill_in_state(action)
-            
-            # Return the resulting sample
-            return True, {
-                "state": state,
-                "action": action
-            }
+        # --- Convert degrees to radians ---
+        # The first 5 columns are joint angles, the 6th is the gripper.
+        # Only convert the joint angles.
+        qpos[:, :5] = np.deg2rad(qpos[:, :5])
+        actions[:, :5] = np.deg2rad(actions[:, :5])
+        # --- MODIFICATION END ---
+
+        # --- Normalize gripper to [0, 1] ---
+        gripper_min = 0.650288999080658
+        gripper_max = 49.13294982910156
+        qpos[:, 5] = (qpos[:, 5] - gripper_min) / (gripper_max - gripper_min)
+        actions[:, 5] = (actions[:, 5] - gripper_min) / (gripper_max - gripper_min)
+        # --- NEW MODIFICATION END ---
+
+        # 跳过初始静止帧
+        EPS = 1e-2
+        qpos_delta = np.abs(qpos - qpos[0])
+        moving_indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
+
+        if moving_indices.size > 0:
+            first_idx = moving_indices[0]
+        else:
+            # 如果没有移动帧，使用整个轨迹
+            first_idx = 0
+
+        # 提取有效部分（跳过静止帧）
+        state = qpos[first_idx:]
+        action = actions[first_idx:]
+
+        # 填充到统一状态向量
+        def fill_in_state(values):
+            UNI_STATE_INDICES = [
+                                    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(5)
+                                ] + [
+                                    STATE_VEC_IDX_MAPPING["right_gripper_open"]
+                                ]
+
+            uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
+            uni_vec[..., UNI_STATE_INDICES] = values
+            return uni_vec
+
+        return True, {
+            "state": fill_in_state(state),
+            "action": fill_in_state(action)
+        }
 
 if __name__ == "__main__":
     ds = HDF5VLADataset()

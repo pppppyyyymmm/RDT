@@ -174,7 +174,7 @@ class RoboticDiffusionTransformerModel(object):
         """
         # Rescale the gripper to the range of [0, 1]
         joints = joints / torch.tensor(
-            [[[1, 1, 1, 1, 1, 1, 4.7908, 1, 1, 1, 1, 1, 1, 4.7888]]],
+            [[[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]],
             device=joints.device, dtype=joints.dtype
         )
         
@@ -212,7 +212,7 @@ class RoboticDiffusionTransformerModel(object):
         # Note that the action range and proprioception range are different
         # for Mobile ALOHA robot
         joints = joints * torch.tensor(
-            [[[1, 1, 1, 1, 1, 1, 11.8997, 1, 1, 1, 1, 1, 1, 13.9231]]],
+            [[[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]],
             device=joints.device, dtype=joints.dtype
         )
         
@@ -294,6 +294,7 @@ class RoboticDiffusionTransformerModel(object):
         text_embeds = text_embeds.to(device, dtype=dtype)
         
         # Predict the next action chunk given the inputs
+        # import pdb; pdb.set_trace()
         trajectory = self.policy.predict_action(
             lang_tokens=text_embeds,
             lang_attn_mask=torch.ones(

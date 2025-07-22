@@ -1,4 +1,6 @@
 {
+    "overfit_dataset" : 25,
+    "so101_2cam_banana_240x320_opencv" : 25,
     "fractal20220817_data": 3,
     "taco_play": 15,
     "jaco_play": 10,

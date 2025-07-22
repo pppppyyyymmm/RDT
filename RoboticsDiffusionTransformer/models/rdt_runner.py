@@ -215,7 +215,7 @@ class RDTRunner(
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
 
-        loss = F.mse_loss(pred, target)
+        loss = F.mse_loss(pred, target) * 20
         return loss
     
     # ========= Inference  ============
