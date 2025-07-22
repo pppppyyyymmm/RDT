@@ -472,6 +472,8 @@ def control_loop(
 
                     action = robot.send_action(action_to_send)
 
+                    time.sleep(0.025)
+
                     action = {'action': action}
 
         else:
