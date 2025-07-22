@@ -35,12 +35,12 @@ import torch
 from skimage.metrics import mean_squared_error, peak_signal_noise_ratio, structural_similarity
 from tqdm import tqdm
 
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.datasets.video_utils import (
+from lerobot.lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.lerobot.common.datasets.video_utils import (
     decode_video_frames_torchvision,
     encode_video_frames,
 )
-from lerobot.utils.benchmark import TimeBenchmark
+from lerobot.lerobot.common.utils.benchmark import TimeBenchmark
 
 BASE_ENCODING = OrderedDict(
     [

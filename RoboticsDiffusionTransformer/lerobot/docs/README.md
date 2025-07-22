@@ -26,7 +26,6 @@ pip install -e ".[docs]"
 You will also need `nodejs`. Please refer to their [installation page](https://nodejs.org/en/download)
 
 ---
-
 **NOTE**
 
 You only need to generate the documentation to inspect it locally (if you're planning changes and want to
@@ -64,7 +63,6 @@ doc-builder preview lerobot docs/source/
 The docs will be viewable at [http://localhost:3000](http://localhost:3000). You can also preview the docs once you have opened a PR. You will see a bot add a comment to a link where the documentation with your changes lives.
 
 ---
-
 **NOTE**
 
 The `preview` command only works with existing doc files. When you add a completely new file, you need to update `_toctree.yml` & restart `preview` command (`ctrl-c` to stop it & call `doc-builder preview ...` again).
@@ -91,7 +89,6 @@ Sections that were moved:
 
 [ <a href="#section-b">Section A</a><a id="section-a"></a> ]
 ```
-
 and of course, if you moved it to another file, then:
 
 ```
@@ -121,6 +118,7 @@ and objects like True, None or any strings should usually be put in `code`.
 #### Writing a multi-line code block
 
 Multi-line code blocks can be useful for displaying examples. They are done between two lines of three backticks as usual in Markdown:
+
 
 ````
 ```

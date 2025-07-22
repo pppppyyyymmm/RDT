@@ -15,9 +15,9 @@
 # limitations under the License.
 from datasets import Dataset
 
-from lerobot.datasets.push_dataset_to_hub.utils import calculate_episode_data_index
-from lerobot.datasets.sampler import EpisodeAwareSampler
-from lerobot.datasets.utils import (
+from lerobot.lerobot.common.datasets.push_dataset_to_hub.utils import calculate_episode_data_index
+from lerobot.lerobot.common.datasets.sampler import EpisodeAwareSampler
+from lerobot.lerobot.common.datasets.utils import (
     hf_transform_to_torch,
 )
 

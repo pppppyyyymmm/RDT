@@ -19,7 +19,9 @@ import traceback
 import pytest
 from serial import SerialException
 
-from tests.utils import DEVICE
+from lerobot import available_cameras, available_motors, available_robots
+from lerobot.lerobot.common.robot_devices.robots.utils import make_robot
+from tests.utils import DEVICE, make_camera, make_motors_bus
 
 # Import fixture modules as plugins
 pytest_plugins = [
@@ -60,6 +62,21 @@ def _check_component_availability(component_type, available_components, make_com
             traceback.print_exc()
 
         return False
+
+
+@pytest.fixture
+def is_robot_available(robot_type):
+    return _check_component_availability(robot_type, available_robots, make_robot)
+
+
+@pytest.fixture
+def is_camera_available(camera_type):
+    return _check_component_availability(camera_type, available_cameras, make_camera)
+
+
+@pytest.fixture
+def is_motor_available(motor_type):
+    return _check_component_availability(motor_type, available_motors, make_motors_bus)
 
 
 @pytest.fixture

@@ -17,7 +17,7 @@ import datasets
 import pytest
 from huggingface_hub.utils import filter_repo_objects
 
-from lerobot.datasets.utils import (
+from lerobot.lerobot.common.datasets.utils import (
     EPISODES_PATH,
     EPISODES_STATS_PATH,
     INFO_PATH,

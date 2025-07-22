@@ -19,7 +19,7 @@ import pyarrow.compute as pc
 import pytest
 import torch
 
-from lerobot.datasets.utils import (
+from lerobot.lerobot.common.datasets.utils import (
     check_delta_timestamps,
     check_timestamps_sync,
     get_delta_indices,
